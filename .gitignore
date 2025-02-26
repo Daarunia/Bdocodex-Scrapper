@@ -1,0 +1,16 @@
+# Ignorer le fichier JSON de sortie
+recettes.json
+
+# Ignorer les fichiers de logs et les caches de Scrapy
+.scrapy/
+*.log
+*.pyc
+__pycache__/
+
+# Ignorer les fichiers de Selenium WebDriver (si téléchargés manuellement)
+chromedriver
+chromedriver.exe
+
+# Ignorer les fichiers temporaires
+.DS_Store
+*.swp
