@@ -16,9 +16,9 @@ class BdoCodexSpider(scrapy.Spider):
     def __init__(self, *args, **kwargs):
         super(BdoCodexSpider, self).__init__(*args, **kwargs)
 
-        # Configurer Selenium (mode headless)
+        # Configurer Selenium
         chrome_options = Options()
-        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
@@ -35,11 +35,17 @@ class BdoCodexSpider(scrapy.Spider):
         self.cactch_popup()
 
         while True:
-            # Obtenir le HTML actuel et le parser avec Scrapy
             response = HtmlResponse(url=self.driver.current_url, body=self.driver.page_source, encoding='utf-8')
 
             self.logger.warning("Extraction des recettes depuis la page...")
+            
+            max_items_per_page = 10  # Nombre maximal d'items par page
+            item_count = 0  # Compteur d'items traités sur cette page
+
             for row in response.css("table.table tbody tr"):
+                if item_count >= max_items_per_page:
+                    break  # On stoppe la boucle si on a atteint 10 items
+
                 recipe_id = row.css("td.dt-id::text").get()
                 recipe_name = row.css("td.dt-title b::text").get()
                 self.logger.warning(f"Traitement de la recette {recipe_name}...")
@@ -73,11 +79,14 @@ class BdoCodexSpider(scrapy.Spider):
                         "ingredients": ingredients,
                         "rewards": rewards
                     }
+                item_count += 1
 
             # Vérifier s'il y a une page suivante et cliquer dessus
             if not self.next_page():
-                self.close_spider
                 break
+
+        self.logger.warning("Fin du scraping.")
+        self.close_spider()
 
     def next_page(self):
         """Clique sur 'Suivant' et attend le chargement de la nouvelle page. Retourne False si dernière page."""
@@ -94,7 +103,6 @@ class BdoCodexSpider(scrapy.Spider):
             # Attendre qu'il soit cliquable et cliquer dessus
             WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(next_button)).click()
 
-            time.sleep(5)  # Laisser le temps à la page de charger
             return True
 
         except ElementClickInterceptedException:
@@ -133,7 +141,7 @@ class BdoCodexSpider(scrapy.Spider):
                 # Sélectionner le **deuxième bouton** dans la pop-up
                 WebDriverWait(self.driver, 2).until(EC.element_to_be_clickable((By.XPATH, "(//div[@class='qc-cmp2-summary-buttons']//button)[2]"))).click()
                 self.logger.warning("Pop-up fermée avec succès.")
-                time.sleep(5)
+                time.sleep(1)
 
         except TimeoutException:
             self.logger.warning("Pas de pop-up détectée.")
