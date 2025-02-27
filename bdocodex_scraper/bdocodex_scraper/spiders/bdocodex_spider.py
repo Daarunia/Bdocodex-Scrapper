@@ -3,6 +3,10 @@ import time
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from scrapy.http import HtmlResponse
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException, TimeoutException
 
 class BdoCodexSpider(scrapy.Spider):
     name = "bdocodex"
@@ -14,7 +18,7 @@ class BdoCodexSpider(scrapy.Spider):
 
         # Configurer Selenium (mode headless)
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
@@ -23,85 +27,115 @@ class BdoCodexSpider(scrapy.Spider):
         self.driver = webdriver.Chrome(options=chrome_options)
 
     def parse(self, response):
-        """Parse la page principale et extrait les informations des recettes."""
-        response = HtmlResponse(url=response.url, body=self.fetch_page_with_scroll(response.url), encoding='utf-8')
+        """Parcourt toutes les pages de la table et récupère les recettes."""
+        self.driver.get(response.url)
+        time.sleep(3)
 
-        self.logger.warning("Début de l'extraction des recettes depuis la table...")
-        for row in response.css("table.table tbody tr"):
-            # Récupération de l'ID, du nom et de l'icône de la recette
-            recipe_id = row.css("td.dt-id::text").get()
-            recipe_name = row.css("td.dt-title b::text").get()
-            icon_url = row.css("td.dt-icon img::attr(src)").get()
-            icon_url = response.urljoin(icon_url) if icon_url else None
+        # Vérifie et ferme une éventuelle popup
+        self.cactch_popup()
 
-            # Récupération de la profession, niveau et expérience
-            levels = [lvl.strip() for lvl in row.css("td.dt-level::text").getall() if lvl.strip()]
-            profession = levels[0] if len(levels) > 0 else None
-            min_level = levels[1] if len(levels) > 1 else None
-            exp_gain = levels[2] if len(levels) > 2 else None
-            weight = levels[3] if len(levels) > 3 else None
+        while True:
+            # Obtenir le HTML actuel et le parser avec Scrapy
+            response = HtmlResponse(url=self.driver.current_url, body=self.driver.page_source, encoding='utf-8')
 
-            # Extraction des ingrédients et récompenses
-            reward_cells = row.css("td.dt-reward")  # Liste des 2 cellules contenant les ingrédients et les récompenses
-            ingredients = []
-            rewards = []
+            self.logger.warning("Extraction des recettes depuis la page...")
+            for row in response.css("table.table tbody tr"):
+                recipe_id = row.css("td.dt-id::text").get()
+                recipe_name = row.css("td.dt-title b::text").get()
+                self.logger.warning(f"Traitement de la recette {recipe_name}...")
 
-            if len(reward_cells) >= 2:
-                # Extraction des ingrédients
-                for ingredient in reward_cells[0].css("div.iconset_wrapper_medium"):
-                    ingredient_icon = ingredient.css("img::attr(src)").get()
-                    ingredient_quantity = ingredient.css("div.quantity_small::text").get()
-                    ingredients.append({
-                        "icon": response.urljoin(ingredient_icon) if ingredient_icon else None,
-                        "quantity": ingredient_quantity.strip() if ingredient_quantity else None
-                    })
+                icon_url = row.css("td.dt-icon img::attr(src)").get()
+                icon_url = response.urljoin(icon_url) if icon_url else None
 
-                # Extraction des récompenses finales
-                for reward in reward_cells[1].css("div.iconset_wrapper_medium"):
-                    reward_icon = reward.css("img::attr(src)").get()
-                    reward_quantity = reward.css("div.quantity_small::text").get()
-                    rewards.append({
-                        "icon": response.urljoin(reward_icon) if reward_icon else None,
-                        "quantity": reward_quantity.strip() if reward_quantity else None
-                    })
+                levels = [lvl.strip() for lvl in row.css("td.dt-level::text").getall() if lvl.strip()]
+                profession = levels[0] if len(levels) > 0 else None
+                min_level = levels[1] if len(levels) > 1 else None
+                exp_gain = levels[2] if len(levels) > 2 else None
+                weight = levels[3] if len(levels) > 3 else None
 
-            if recipe_name:
-                yield {
-                    "id": recipe_id,
-                    "title": recipe_name,
-                    "icon": icon_url,
-                    "profession": profession,
-                    "min_level": min_level,
-                    "exp_gain": exp_gain,
-                    "weight": weight,
-                    "ingredients": ingredients,
-                    "rewards": rewards
-                }
-            else:
-                self.logger.warning("Recette sans nom trouvée, passage au suivant.")
+                reward_cells = row.css("td.dt-reward")
+                ingredients = []
+                rewards = []
 
-    def fetch_page_with_scroll(self, url):
-        """Ouvre une page avec Selenium, effectue un scroll progressif et récupère le HTML chargé."""
-        self.logger.warning(f"Ouverture de la page {url} avec Selenium...")
-        self.driver.get(url)
+                if len(reward_cells) >= 2:
+                    self.parse_item(ingredients, reward_cells[0].css("div.iconset_wrapper_medium"), response)
+                    self.parse_item(rewards, reward_cells[1].css("div.iconset_wrapper_medium"), response)
 
-        scroll_pause_time = 0.5
-        scroll_step = 2000
-        current_scroll = 0
-        scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+                if recipe_name:
+                    yield {
+                        "id": recipe_id,
+                        "title": recipe_name,
+                        "icon": icon_url,
+                        "profession": profession,
+                        "min_level": min_level,
+                        "exp_gain": exp_gain,
+                        "weight": weight,
+                        "ingredients": ingredients,
+                        "rewards": rewards
+                    }
 
-        self.logger.warning("Début du scroll pour charger le contenu...")
-        while current_scroll < scroll_height:
-            self.driver.execute_script(f"window.scrollTo(0, {current_scroll});")
-            current_scroll += scroll_step
-            time.sleep(scroll_pause_time)
-            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            # Vérifier s'il y a une page suivante et cliquer dessus
+            if not self.next_page():
+                self.close_spider
+                break
 
-        self.logger.warning("Scroll terminé. Attente du chargement final...")
-        time.sleep(5)
+    def next_page(self):
+        """Clique sur 'Suivant' et attend le chargement de la nouvelle page. Retourne False si dernière page."""
+        self.logger.warning("Passage à la page suivante...")
 
-        html = self.driver.page_source
-        self.logger.warning("HTML récupéré, fermeture du driver Selenium.")
+        try:
+            # Sélectionner le bouton "Next"
+            next_button = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.CSS_SELECTOR, "li.next a.page-link")))
+
+            # Scroll jusqu'au bouton pour le rendre visible
+            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+            time.sleep(1)  # Petite pause pour éviter les problèmes de timing
+
+            # Attendre qu'il soit cliquable et cliquer dessus
+            WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable(next_button)).click()
+
+            time.sleep(5)  # Laisser le temps à la page de charger
+            return True
+
+        except ElementClickInterceptedException:
+            self.logger.warning("Dernière page atteinte.")
+            return False
+        except TimeoutException:
+            self.logger.warning("Erreur : Impossible de cliquer sur 'Suivant'.")
+            return False
+
+    def parse_item(self, items_list, html_items, response):
+        """Extrait les ingrédients et récompenses d'une recette."""
+        for item in html_items:
+            item_icon = item.css("img::attr(src)").get()
+            item_quantity = item.css("div.quantity_small::text").get()
+            items_list.append({
+                "icon": response.urljoin(item_icon) if item_icon else None,
+                "quantity": item_quantity.strip() if item_quantity else None
+            })
+
+    def close_spider(self):
+        """Ferme Selenium proprement."""
+        self.logger.warning("Fermeture du WebDriver Selenium...")
         self.driver.quit()
+        
+    def cactch_popup(self):
+        """Vérifie si une pop-up de consentement est présente et clique sur le 2ème bouton."""
+        try:
+            self.logger.warning("Vérification de la pop-up de consentement...")
 
-        return html
+            # Attendre que la pop-up soit présente
+            popup = WebDriverWait(self.driver, 5).until(EC.presence_of_element_located((By.ID, "qc-cmp2-ui")))
+
+            if popup.is_displayed():
+                self.logger.warning("Pop-up détectée, tentative de fermeture...")
+
+                # Sélectionner le **deuxième bouton** dans la pop-up
+                WebDriverWait(self.driver, 2).until(EC.element_to_be_clickable((By.XPATH, "(//div[@class='qc-cmp2-summary-buttons']//button)[2]"))).click()
+                self.logger.warning("Pop-up fermée avec succès.")
+                time.sleep(5)
+
+        except TimeoutException:
+            self.logger.warning("Pas de pop-up détectée.")
+        except NoSuchElementException:
+            self.logger.warning("Impossible de trouver le bouton de la pop-up.")
