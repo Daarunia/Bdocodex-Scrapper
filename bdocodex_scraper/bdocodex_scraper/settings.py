@@ -9,7 +9,7 @@ import logging
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
 # Custom logs
-LOG_STDOUT = True
+LOG_LEVEL = 'WARNING'
 
 BOT_NAME = "bdocodex_scraper"
 
