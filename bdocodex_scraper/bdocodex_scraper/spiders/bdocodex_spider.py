@@ -126,7 +126,7 @@ class BdoCodexSpider(scrapy.Spider):
         """Ferme Selenium proprement."""
         self.logger.warning("Fermeture du WebDriver Selenium...")
         self.driver.quit()
-        
+
     def cactch_popup(self):
         """Vérifie si une pop-up de consentement est présente et clique sur le 2ème bouton."""
         try:
