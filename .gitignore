@@ -1,5 +1,5 @@
 # Ignorer le fichier JSON de sortie
-recettes.json
+data.json
 
 # Ignorer les fichiers de logs et les caches de Scrapy
 .scrapy/

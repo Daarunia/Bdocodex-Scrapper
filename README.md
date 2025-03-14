@@ -45,7 +45,7 @@ scrapy crawl bdocodex
 Pour sauvegarder les résultats dans un fichier JSON :
 
 ```bash
-scrapy crawl bdocodex -o resultats.json
+python -m scrapy crawl bdocodex
 ```
 
 ## 📂 Résultats
