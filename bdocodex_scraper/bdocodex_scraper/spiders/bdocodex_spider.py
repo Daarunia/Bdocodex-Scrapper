@@ -3,6 +3,7 @@ import time
 import json
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from scrapy import signals
 from scrapy.http import HtmlResponse
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -19,7 +20,7 @@ class BdoCodexSpider(scrapy.Spider):
 
         # Configuration de Selenium
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        #chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"])
@@ -32,6 +33,12 @@ class BdoCodexSpider(scrapy.Spider):
         self.items_scraped = 0  # Compteur pour suivre le nombre d'items scrappés
         self.total_items = 0  # Nombre total d'items à scraper
 
+    @classmethod
+    def from_crawler(cls, crawler, *args, **kwargs):
+        spider = super(BdoCodexSpider, cls).from_crawler(crawler, *args, **kwargs)
+        crawler.signals.connect(spider.finish_scraping, signal=signals.spider_idle)
+        return spider
+    
     def parse(self, response):
         """Parcourt toutes les pages de la table et récupère les recettes."""
         self.driver.get(response.url)
@@ -129,14 +136,20 @@ class BdoCodexSpider(scrapy.Spider):
         # Récupérer l'HTML après le chargement complet de la page avec Selenium
         html_content = self.driver.page_source
         response = HtmlResponse(url=self.driver.current_url, body=html_content, encoding='utf-8')
-
         item_data = {}
 
         # Extraire les données de l'item
         if response:
             item_data["name"] = response.css("div.item_title#item_name b::text").get()
             item_data["icon"] = response.urljoin(response.css("img::attr(src)").get())
-            item_data["description"] = response.css("div.card-body p::text").get()
+
+            # Transformer la liste en une seule chaîne
+            full_text = " ".join(response.xpath('//table[contains(@class, "smallertext")]/tbody/tr[2]/td[@colspan="2"]//text()').getall()).strip()
+
+            # Vérifier si "– Description :" est présent
+            if "– Description :" in full_text:
+                # Extraire uniquement le texte après "– Description :"
+                item_data["description"] = full_text.split("– Description :")[1].split("–")[0].strip()
 
             # Log de l'item récupéré
             self.logger.warning(f"Récupération de l'item : {item_data['name']}...")
@@ -220,7 +233,7 @@ class BdoCodexSpider(scrapy.Spider):
 
         self.logger.warning("Les données ont été sauvegardées dans 'data.json'.")
 
-    def finish_scraping(self, response):
+    def finish_scraping(self):
         """Fonction de callback pour finir le scraping et fermer Selenium."""
         self.logger.warning("Tous les éléments ont été scrappés. Fermeture du WebDriver Selenium...")
         self.save_data()  # Sauvegarder les données après que tout a été scrappé
